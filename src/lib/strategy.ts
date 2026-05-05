@@ -324,12 +324,17 @@ export class StrategyEngine {
         const capturedSL = this.corrHigh!;
         const capturedTP = capturedMid - (capturedSL - capturedMid) * p.sellTpR;
         const h1 = findH1(h1Map, bar.time);
+
+        // FIX: if no H1 data available, allow the trade through
         let h1Ok = !p.useH1Filter;
         if (p.useH1Filter && h1) {
           const h1Range = h1.high - h1.low;
           const h1Position = h1Range > 0 ? (capturedMid - h1.low) / h1Range : 0.5;
           h1Ok = h1Position >= p.minH1Position;
+        } else if (p.useH1Filter && !h1) {
+          h1Ok = true; // no H1 data found, allow trade
         }
+
         if (h1Ok && this.consecSells < p.maxConsecSells) {
           const sell: OpenSell = { entry: capturedMid, sl: capturedSL, tp: capturedTP, bar: idx, time: bar.time };
           this.openSells.push(sell);
