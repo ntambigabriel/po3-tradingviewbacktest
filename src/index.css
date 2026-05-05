@@ -8,8 +8,31 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background: 222 35% 7%;
+    --foreground: 210 20% 90%;
+
+    --po3-bg: 222 35% 7%;            /* #0b0f19 */
+    --po3-toolbar: 215 33% 7%;       /* #0d1117 */
+    --po3-border: 222 35% 15%;       /* #1a2035 */
+    --po3-pill: 222 35% 15%;         /* #1a2035 */
+    --po3-pill-hover: 226 18% 22%;   /* #2a3045 */
+    --po3-text-dim: 200 18% 64%;     /* #8aaabb */
+    --po3-cyan: 188 100% 44%;        /* #00c8e0 */
+    --po3-axis: 220 4% 50%;
+    --po3-panel: 215 33% 7%;
+    --po3-popup-bg: 220 33% 5%;      /* #080b10 */
+    --po3-row-alt: 220 28% 6%;       /* #090d14 */
+    --po3-today: 220 38% 8%;         /* #0c1520 */
+    --po3-r-pos-bg: 145 100% 6%;
+    --po3-r-pos: 144 100% 41%;
+    --po3-r-neg-bg: 350 100% 6%;
+    --po3-r-neg: 0 100% 60%;
+    --po3-r-zero-bg: 220 25% 8%;
+    --po3-r-zero: 200 30% 26%;
+    --po3-amber-bg: 50 100% 4%;
+    --po3-amber: 50 100% 39%;
+    --po3-gold: 47 100% 39%;         /* #c8a800 */
+    --po3-green-soft: 140 100% 19%;
 
     --card: 0 0% 100%;
     --card-foreground: 222.2 84% 4.9%;
