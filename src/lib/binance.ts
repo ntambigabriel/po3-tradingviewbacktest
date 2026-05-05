@@ -15,29 +15,50 @@ export async function fetchKlines(
   const out: Bar[] = [];
   const totalEstimate = Math.max(1, Math.floor((endTime - startTime) / 60000));
   let cursor = startTime;
+  let retries = 0;
+
   while (cursor < endTime) {
     const url = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=1000&startTime=${cursor}&endTime=${endTime}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Binance error ${res.status}`);
-    const data: any[] = await res.json();
-    if (!data.length) break;
-    for (const k of data) {
-      out.push({
-        time: Math.floor(k[0] / 1000),
-        open: parseFloat(k[1]),
-        high: parseFloat(k[2]),
-        low: parseFloat(k[3]),
-        close: parseFloat(k[4]),
-        volume: parseFloat(k[5]),
-      });
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        if (res.status === 429 && retries < 5) {
+          retries++;
+          await new Promise(r => setTimeout(r, 2000 * retries));
+          continue;
+        }
+        throw new Error(`Binance error ${res.status}`);
+      }
+      retries = 0;
+      const data: any[] = await res.json();
+      if (!data.length) break;
+      for (const k of data) {
+        out.push({
+          time: Math.floor(k[0] / 1000),
+          open: parseFloat(k[1]),
+          high: parseFloat(k[2]),
+          low: parseFloat(k[3]),
+          close: parseFloat(k[4]),
+          volume: parseFloat(k[5]),
+        });
+      }
+      const last = data[data.length - 1];
+      cursor = last[6] + 1;
+      onProgress?.(out.length, totalEstimate);
+      if (data.length < 1000) break;
+      // Small delay to avoid rate limiting on large date ranges
+      await new Promise(r => setTimeout(r, 50));
+    } catch (e) {
+      if (retries < 3) {
+        retries++;
+        await new Promise(r => setTimeout(r, 1000 * retries));
+      } else {
+        throw e;
+      }
     }
-    const last = data[data.length - 1];
-    cursor = last[6] + 1;
-    onProgress?.(out.length, totalEstimate);
-    if (data.length < 1000) break;
   }
+
   out.sort((a, b) => a.time - b.time);
-  // dedupe
   const dedup: Bar[] = [];
   let prev = -1;
   for (const b of out) {
