@@ -184,7 +184,7 @@ export default function PO3App() {
         d.balance = d.balance + pnl;
         d.totalR += r;
         d.log = [
-          { type: "SELL", entry: tr.entry, sl: tr.sl, tp: tr.tp, time: ev.bar.time, result: ev.type === "SELL_WIN" ? "WIN" : "LOSS", r, pnl },
+          { type: "SELL" as const, entry: tr.entry, sl: tr.sl, tp: tr.tp, time: ev.bar.time, result: (ev.type === "SELL_WIN" ? "WIN" : "LOSS") as "WIN" | "LOSS", r, pnl },
           ...d.log,
         ].slice(0, 200);
         mutated = true;
