@@ -35,6 +35,7 @@ export default function PO3App() {
   const [showDemo, setShowDemo] = useState(false);
   const [showBacktest, setShowBacktest] = useState(false);
   const [playing, setPlaying] = useState(false);
+  const playingRef = useRef(false); // mirrors playing for use inside intervals
   const [speed, setSpeed] = useState<keyof typeof SPEED_MS>("5x");
   const [startDate, setStartDate] = useState(sevenDaysAgo());
   const [endDate, setEndDate] = useState(todayStr());
@@ -111,61 +112,80 @@ export default function PO3App() {
     if (!chartRef.current) return;
     clearOverlays();
     const chart = chartRef.current;
-    const ext = params.extBars;
-    const futureTime = (currentBar.time + ext * 60) as UTCTimestamp;
+    // FIX: extend lines far into future so they stay visible during replay
+    const futureTime = (currentBar.time + 500 * 60) as UTCTimestamp;
 
-    const addLine = (key: string, color: string, style: LineStyle, points: { time: UTCTimestamp; value: number }[]) => {
-      const s = chart.addLineSeries({ color, lineWidth: 1, lineStyle: style, priceLineVisible: false, lastValueVisible: false });
+    const addLine = (key: string, color: string, style: LineStyle, points: { time: UTCTimestamp; value: number }[], width = 1) => {
+      const s = chart.addLineSeries({ color, lineWidth: width, lineStyle: style, priceLineVisible: false, lastValueVisible: false });
       s.setData(points);
       overlaySeriesRef.current[key] = s;
     };
 
-    const startTime = (snap.p1Bar !== null && barsRef.current[snap.p1Bar]) ? (barsRef.current[snap.p1Bar].time as UTCTimestamp) : (currentBar.time as UTCTimestamp);
+    const startTime = (snap.p1Bar !== null && barsRef.current[snap.p1Bar])
+      ? (barsRef.current[snap.p1Bar].time as UTCTimestamp)
+      : (currentBar.time as UTCTimestamp);
 
-    if (snap.state === 3 && snap.p1 !== null) {
-      addLine("p1", "#ffffff", LineStyle.Dashed, [
+    // Draw P1 line in states 1, 2, 3
+    if ((snap.state === 1 || snap.state === 2 || snap.state === 3) && snap.p1 !== null) {
+      addLine("p1", "#ffffff88", LineStyle.Dashed, [
         { time: startTime, value: snap.p1 },
         { time: futureTime, value: snap.p1 },
       ]);
     }
 
+    // Draw active buy trade levels
     if (snap.inBuyTrade && snap.buyEntry && snap.buySL && snap.buyTP && snap.buyMid) {
       const buyP1Bar = snap.buyP1Bar;
-      const tradeStart = buyP1Bar !== null && barsRef.current[buyP1Bar] ? (barsRef.current[buyP1Bar].time as UTCTimestamp) : (currentBar.time as UTCTimestamp);
-      addLine("buyEntry", "#1848A0", LineStyle.Solid, [
+      const tradeStart = buyP1Bar !== null && barsRef.current[buyP1Bar]
+        ? (barsRef.current[buyP1Bar].time as UTCTimestamp)
+        : (currentBar.time as UTCTimestamp);
+
+      // Blue SL zone top (entry)
+      addLine("buyEntry", "#4488FF", LineStyle.Solid, [
         { time: tradeStart, value: snap.buyEntry },
         { time: futureTime, value: snap.buyEntry },
-      ]);
-      addLine("buySL", "#1848A0", LineStyle.Solid, [
+      ], 1);
+      // Blue SL zone bottom (SL)
+      addLine("buySL", "#4488FF", LineStyle.Solid, [
         { time: tradeStart, value: snap.buySL },
         { time: futureTime, value: snap.buySL },
-      ]);
-      addLine("buyTP", "#404040", LineStyle.Solid, [
+      ], 1);
+      // Grey TP zone top
+      addLine("buyTP", "#888888", LineStyle.Solid, [
         { time: tradeStart, value: snap.buyTP },
         { time: futureTime, value: snap.buyTP },
-      ]);
+      ], 1);
+      // Midpoint line — gold if not touched, red if touched
       addLine("buyMid", snap.midTouched ? "#ff3333" : "#ffd700", LineStyle.Solid, [
         { time: tradeStart, value: snap.buyMid },
         { time: futureTime, value: snap.buyMid },
-      ]);
+      ], 2);
+
+      // 100% TOP label line
+      addLine("buyTPLabel", "#00d06044", LineStyle.Dashed, [
+        { time: tradeStart, value: snap.buyTP },
+        { time: futureTime, value: snap.buyTP },
+      ], 1);
     }
 
+    // Draw open sell levels — gold entry, red SL, green TP
     snap.openSells.forEach((sell, i) => {
-      const ts = (barsRef.current[sell.bar]?.time ?? currentBar.time) as UTCTimestamp;
+      const sellBarTime = barsRef.current[sell.bar]?.time ?? currentBar.time;
+      const ts = sellBarTime as UTCTimestamp;
       addLine(`sellE_${i}`, "#ffd700", LineStyle.Dashed, [
         { time: ts, value: sell.entry },
         { time: futureTime, value: sell.entry },
-      ]);
+      ], 1);
       addLine(`sellSL_${i}`, "#ff3333", LineStyle.Dashed, [
         { time: ts, value: sell.sl },
         { time: futureTime, value: sell.sl },
-      ]);
+      ], 1);
       addLine(`sellTP_${i}`, "#00d060", LineStyle.Dashed, [
         { time: ts, value: sell.tp },
         { time: futureTime, value: sell.tp },
-      ]);
+      ], 1);
     });
-  }, [clearOverlays, params.extBars]);
+  }, [clearOverlays]);
 
   const applyEventsToDemo = useCallback((events: StrategyEvent[]) => {
     let d = { ...demoRef.current };
@@ -208,6 +228,8 @@ export default function PO3App() {
         allMarkersRef.current.push({ time, position: "aboveBar", color: "#ff8800", shape: "circle", text: "SL ✗" });
       } else if (ev.type === "MID_TOUCHED") {
         allMarkersRef.current.push({ time, position: "belowBar", color: "#ffd700", shape: "circle" });
+      } else if (ev.type === "SELL_ENTRY") {
+        allMarkersRef.current.push({ time, position: "aboveBar", color: "#ffd700", shape: "arrowDown", text: "SELL" });
       }
     }
   }, []);
@@ -215,18 +237,30 @@ export default function PO3App() {
   const loadData = useCallback(async () => {
     setLoading(true);
     setLoadingMessage("Fetching BTCUSDT 1m data...");
+    // FIX: stop replay before loading
+    playingRef.current = false;
+    setPlaying(false);
+    if (playRef.current) {
+      clearInterval(playRef.current);
+      playRef.current = null;
+    }
     try {
       const start = new Date(startDate).getTime();
       const end = new Date(endDate).getTime() + 86399000;
       const bars = await fetchKlines(start, end, (f, t) => setLoadProgress({ fetched: f, total: t }));
       barsRef.current = bars;
       h1MapRef.current = buildH1Map(bars);
-      // Initial render: full data
+
+      // Set full candle data
       if (candleSeriesRef.current) {
         candleSeriesRef.current.setData(bars.map((b) => ({ time: b.time as UTCTimestamp, open: b.open, high: b.high, low: b.low, close: b.close })));
         candleSeriesRef.current.setMarkers([]);
       }
       allMarkersRef.current = [];
+
+      // FIX: reset demo before processing
+      setDemo(d => ({ ...d, balance: d.startBalance, openTrades: [], log: [], totalR: 0 }));
+
       // Reset engine then process all bars to live edge
       engineRef.current = new StrategyEngine(params);
       let snap: Snapshot | null = null;
@@ -263,10 +297,18 @@ export default function PO3App() {
       }
       return;
     }
+    playingRef.current = true;
     const ms = SPEED_MS[speed];
     playRef.current = window.setInterval(() => {
+      // FIX: check ref immediately so pause takes effect without waiting for re-render
+      if (!playingRef.current) {
+        clearInterval(playRef.current!);
+        playRef.current = null;
+        return;
+      }
       const bars = barsRef.current;
       if (idxRef.current >= bars.length - 1) {
+        playingRef.current = false;
         setPlaying(false);
         return;
       }
@@ -291,8 +333,23 @@ export default function PO3App() {
     };
   }, [playing, speed, drawOverlays, applyEventsToDemo, collectMarkers, fullMarkersRebuild]);
 
-  const reset = () => {
+  const handlePause = useCallback(() => {
+    playingRef.current = false;
     setPlaying(false);
+    if (playRef.current) {
+      clearInterval(playRef.current);
+      playRef.current = null;
+    }
+  }, []);
+
+  const handlePlay = useCallback(() => {
+    if (idxRef.current >= barsRef.current.length - 1) return;
+    playingRef.current = true;
+    setPlaying(true);
+  }, []);
+
+  const reset = () => {
+    handlePause();
     engineRef.current = new StrategyEngine(params);
     allMarkersRef.current = [];
     setDemo((d) => ({ ...d, balance: d.startBalance, openTrades: [], log: [], totalR: 0 }));
@@ -307,8 +364,7 @@ export default function PO3App() {
   };
 
   const goToEnd = () => {
-    if (!barsRef.current.length) return;
-    setPlaying(false);
+    handlePause();
     engineRef.current = new StrategyEngine(params);
     allMarkersRef.current = [];
     let snap: Snapshot | null = null;
@@ -335,7 +391,6 @@ export default function PO3App() {
     try {
       const start = new Date(startDate).getTime();
       const end = new Date(endDate).getTime() + 86399000;
-      // refetch if not in range
       const have = barsRef.current;
       if (!have.length || have[0].time * 1000 > start + 60000 || have[have.length - 1].time * 1000 < end - 86400000) {
         const bars = await fetchKlines(start, end, (f, t) => setLoadProgress({ fetched: f, total: t }));
@@ -451,20 +506,35 @@ export default function PO3App() {
           <PillBtn onClick={() => setShowBacktest((v) => !v)} active={showBacktest}>⚡ Backtest</PillBtn>
           <Sep />
           <PillBtn onClick={reset}>◀◀</PillBtn>
-          <PillBtn onClick={() => setPlaying(true)} active={playing}>▶ Play</PillBtn>
-          <PillBtn onClick={() => setPlaying(false)}>⏸ Pause</PillBtn>
+          {/* FIX: Play and Pause use dedicated handlers that sync the ref immediately */}
+          <PillBtn onClick={handlePlay} active={playing}>▶ Play</PillBtn>
+          <PillBtn onClick={handlePause}>⏸ Pause</PillBtn>
           <PillBtn onClick={goToEnd}>▶▶</PillBtn>
           <span style={{ marginLeft: 8, color: COLORS.textDim, fontSize: 11 }}>Speed:</span>
           {(["1x", "5x", "10x", "50x"] as const).map((s) => <SpeedBtn key={s} s={s} />)}
           <Sep />
           <span style={{ color: COLORS.textDim, fontSize: 11 }}>From</span>
-          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
-            style={{ background: COLORS.pill, color: COLORS.textDim, border: `1px solid ${COLORS.border}`, padding: "4px 6px", borderRadius: 4, fontSize: 11, marginLeft: 4 }} />
+          <input
+            type="date"
+            value={startDate}
+            min="2020-01-01"
+            max={endDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            style={{ background: COLORS.pill, color: COLORS.textDim, border: `1px solid ${COLORS.border}`, padding: "4px 6px", borderRadius: 4, fontSize: 11, marginLeft: 4 }}
+          />
           <span style={{ color: COLORS.textDim, fontSize: 11, marginLeft: 6 }}>To</span>
-          <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
-            style={{ background: COLORS.pill, color: COLORS.textDim, border: `1px solid ${COLORS.border}`, padding: "4px 6px", borderRadius: 4, fontSize: 11, marginLeft: 4 }} />
-          <button onClick={loadData}
-            style={{ marginLeft: 6, background: COLORS.cyan, color: "#0b0f19", border: "none", padding: "6px 12px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+          <input
+            type="date"
+            value={endDate}
+            min="2020-01-01"
+            max={todayStr()}
+            onChange={(e) => setEndDate(e.target.value)}
+            style={{ background: COLORS.pill, color: COLORS.textDim, border: `1px solid ${COLORS.border}`, padding: "4px 6px", borderRadius: 4, fontSize: 11, marginLeft: 4 }}
+          />
+          <button
+            onClick={loadData}
+            style={{ marginLeft: 6, background: COLORS.cyan, color: "#0b0f19", border: "none", padding: "6px 12px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}
+          >
             Load Data
           </button>
         </div>
@@ -490,8 +560,38 @@ export default function PO3App() {
             <div style={{ position: "absolute", left: 8, top: 8, background: "rgba(8,11,16,0.7)", padding: "4px 8px", borderRadius: 4, fontSize: 10, fontFamily: "ui-monospace,monospace", color: COLORS.textDim, zIndex: 5 }}>
               <span>State: <span style={{ color: STATE_COLOR[snapshot.state] }}>{STATE_LABEL[snapshot.state]}</span></span>
               <span style={{ marginLeft: 12 }}>Bar {currentBarIndex + 1}/{barsRef.current.length}</span>
+              {snapshot.inBuyTrade && (
+                <span style={{ marginLeft: 12, color: "#26a69a" }}>
+                  IN TRADE | Mid: {snapshot.midTouched ? <span style={{ color: "#ff3333" }}>TOUCHED</span> : <span style={{ color: "#ffd700" }}>WAITING</span>}
+                </span>
+              )}
+              {snapshot.openSells.length > 0 && (
+                <span style={{ marginLeft: 12, color: "#ffd700" }}>
+                  SELLS OPEN: {snapshot.openSells.length}
+                </span>
+              )}
             </div>
           )}
+
+          {/* Legend */}
+          <div style={{ position: "absolute", right: 8, bottom: 8, background: "rgba(8,11,16,0.8)", padding: "6px 10px", borderRadius: 4, fontSize: 10, fontFamily: "ui-monospace,monospace", zIndex: 5, display: "flex", flexDirection: "column", gap: 3 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ width: 20, height: 2, background: "#4488FF", display: "inline-block" }}></span>
+              <span style={{ color: COLORS.textDim }}>Buy Zone (Entry / SL)</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ width: 20, height: 2, background: "#ffd700", display: "inline-block" }}></span>
+              <span style={{ color: COLORS.textDim }}>Midpoint / Sell Entry</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ width: 20, height: 2, background: "#ff3333", display: "inline-block" }}></span>
+              <span style={{ color: COLORS.textDim }}>Sell SL</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ width: 20, height: 2, background: "#00d060", display: "inline-block" }}></span>
+              <span style={{ color: COLORS.textDim }}>Sell TP</span>
+            </div>
+          </div>
         </div>
         {showBacktest && (
           <BacktestPanel
